@@ -1,10 +1,19 @@
 // app/signup/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowLeft, ArrowRight, Check, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Loader2,
+  Plus,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 
 import MapboxMap from "@/components/MapboxMap";
 import LocationInput from "@/components/LocationInput";
@@ -31,7 +40,9 @@ function normalizePlaceKey(city?: string, region?: string, country?: string) {
 
 function makeLocalDateTimeValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
 }
 
 type MemoryDraft = {
@@ -39,14 +50,15 @@ type MemoryDraft = {
   city: string;
   region: string;
   note: string;
-  dateLocal: string; // datetime-local value
+  dateLocal: string; // datetime-local
   file: File | null; // ONE photo per memory
 };
 
-const MAX_MEMORIES = 5;
+const MAX_MEMORIES = 10; // UI text still says 1–5; set to 5 if you want hard limit
 
 export default function SignupOnboardingPage() {
   const router = useRouter();
+  const cardScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [step, setStep] = useState<Step>(1);
   const [loading, setLoading] = useState(false);
@@ -70,7 +82,7 @@ export default function SignupOnboardingPage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
-  // Step 3: memories (1–5), 1 photo per memory
+  // Step 3: memories (stacked card carousel)
   const [memories, setMemories] = useState<MemoryDraft[]>(() => [
     {
       key: crypto.randomUUID(),
@@ -81,12 +93,15 @@ export default function SignupOnboardingPage() {
       file: null,
     },
   ]);
+  const [activeIdx, setActiveIdx] = useState(0);
 
   // Slug availability
   const normalizedSlug = useMemo(() => normalizeSlug(shareSlug), [shareSlug]);
-  const [slugStatus, setSlugStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [slugStatus, setSlugStatus] = useState<
+    "idle" | "checking" | "available" | "taken" | "invalid"
+  >("idle");
 
-  // Preview for avatar
+  // Avatar preview
   useEffect(() => {
     if (!avatarFile) {
       setAvatarPreview(null);
@@ -213,7 +228,7 @@ export default function SignupOnboardingPage() {
     return inserted.data.id as string;
   }
 
-  // STEP 1 action: create auth user and ensure session exists
+  // STEP 1: create auth user + session
   async function handleCreateAccount() {
     if (loading) return;
     setError(null);
@@ -230,7 +245,7 @@ export default function SignupOnboardingPage() {
 
       let userId = data.user?.id ?? null;
 
-      // Fallback: sign-in to guarantee session
+      // Fallback sign-in
       if (!userId) {
         const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
           email,
@@ -256,7 +271,7 @@ export default function SignupOnboardingPage() {
     }
   }
 
-  // STEP 2 action: save profile (+ avatar upload) then move to step 3
+  // STEP 2: save profile (+ avatar)
   async function handleSaveProfileAndNext() {
     if (loading) return;
     setError(null);
@@ -325,7 +340,7 @@ export default function SignupOnboardingPage() {
     }
   }
 
-  // STEP 3 action: create 1–5 memories, each with 1 photo, then redirect
+  // STEP 3: create N memories (each with 1 photo)
   async function handleFinish(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
@@ -367,7 +382,7 @@ export default function SignupOnboardingPage() {
         // 1) place
         const placeId = await ensurePlace(city, region, "United States");
 
-        // 2) pin (user_places) — make sure it exists for this place
+        // 2) pin (user_places)
         const pinLabel = `${city} Trip`;
         const upsertPin = await supabase
           .from("user_places")
@@ -458,7 +473,7 @@ export default function SignupOnboardingPage() {
     setError(null);
     setMemories((prev) => {
       if (prev.length >= MAX_MEMORIES) return prev;
-      return [
+      const next = [
         ...prev,
         {
           key: crypto.randomUUID(),
@@ -469,12 +484,53 @@ export default function SignupOnboardingPage() {
           file: null,
         },
       ];
+      return next;
+    });
+
+    // Move focus to the new card
+    setActiveIdx((i) => Math.min(i + 1, MAX_MEMORIES - 1));
+
+    // Scroll to the end of the horizontal list
+    requestAnimationFrame(() => {
+      cardScrollRef.current?.scrollTo({
+        left: cardScrollRef.current.scrollWidth,
+        behavior: "smooth",
+      });
     });
   }
 
   function removeMemory(key: string) {
     setError(null);
-    setMemories((prev) => (prev.length <= 1 ? prev : prev.filter((m) => m.key !== key)));
+    setMemories((prev) => {
+      if (prev.length <= 1) return prev;
+      const idx = prev.findIndex((m) => m.key === key);
+      const next = prev.filter((m) => m.key !== key);
+      // keep active index sane
+      setActiveIdx((cur) => {
+        if (cur > next.length - 1) return next.length - 1;
+        // if removed card was before active, shift left
+        if (idx >= 0 && idx < cur) return Math.max(0, cur - 1);
+        // if removed card is active, clamp
+        if (idx === cur) return Math.min(cur, next.length - 1);
+        return cur;
+      });
+      return next;
+    });
+
+    requestAnimationFrame(() => {
+      cardScrollRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+    });
+  }
+
+  function goToIdx(nextIdx: number) {
+    setActiveIdx(() => {
+      const clamped = Math.max(0, Math.min(nextIdx, memories.length - 1));
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`mem-card-${clamped}`);
+        el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+      });
+      return clamped;
+    });
   }
 
   return (
@@ -485,8 +541,10 @@ export default function SignupOnboardingPage() {
           <div className="absolute inset-0 bg-black/60" />
         </div>
 
-        <div className="relative z-10 mx-auto flex h-full max-w-4xl flex-col justify-center px-6">
-          <div className="mx-auto w-full max-w-xl rounded-[28px] border border-white/10 bg-black/70 p-5 shadow-2xl backdrop-blur md:p-7">
+        {/* NOT centered vertically anymore -> better for long content on laptops/phones */}
+        <div className="relative z-10 mx-auto flex h-full max-w-4xl flex-col justify-start px-6 py-10">
+          {/* Card becomes scrollable if needed */}
+          <div className="mx-auto w-full max-w-xl max-h-[85svh] overflow-y-auto rounded-[28px] border border-white/10 bg-black/70 p-5 shadow-2xl backdrop-blur md:p-7">
             <div className="flex items-center justify-between">
               <div className="text-sm text-white/70">Step {step} of 3</div>
 
@@ -567,7 +625,9 @@ export default function SignupOnboardingPage() {
                     ) : (
                       <span className="text-green-300">Available ✓</span>
                     )}
-                    {normalizedSlug ? <span className="ml-2 text-zinc-500">Preview: /{normalizedSlug}</span> : null}
+                    {normalizedSlug ? (
+                      <span className="ml-2 text-zinc-500">Preview: /{normalizedSlug}</span>
+                    ) : null}
                   </div>
 
                   <input
@@ -589,7 +649,9 @@ export default function SignupOnboardingPage() {
                     <div className="text-xs text-white/70">Profile photo (optional)</div>
                     <div className="mt-3 flex items-center gap-3">
                       <div className="relative h-14 w-14 overflow-hidden rounded-full border border-white/10 bg-white/5">
-                        {avatarPreview ? <Image src={avatarPreview} alt="avatar" fill className="object-cover" /> : null}
+                        {avatarPreview ? (
+                          <Image src={avatarPreview} alt="avatar" fill className="object-cover" />
+                        ) : null}
                       </div>
                       <input
                         type="file"
@@ -602,102 +664,102 @@ export default function SignupOnboardingPage() {
 
                   <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-xs text-white/80">
                     <span>Public profile</span>
-                    <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={isPublic}
+                      onChange={(e) => setIsPublic(e.target.checked)}
+                    />
                   </label>
                 </>
               ) : null}
 
-              {/* STEP 3 */}
+              {/* STEP 3 - CARD STACK / HORIZONTAL */}
               {step === 3 ? (
                 <>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold">Add memories</div>
-                      <div className="text-xs text-white/60">Add 1–5 memories. Each memory needs a location + 1 photo.</div>
+                      <div className="text-xs text-white/60">
+                        Add 1–5 memories. Each memory needs a location + 1 photo.
+                      </div>
                     </div>
 
                     <button
                       type="button"
                       onClick={addMemory}
                       disabled={loading || memories.length >= MAX_MEMORIES}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/15 disabled:opacity-50"
+                      className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/15 disabled:opacity-50"
                     >
                       <Plus size={14} />
-                      Add memory
+                      Add
                     </button>
                   </div>
 
-                  <div className="grid gap-3">
-                    {memories.map((m, idx) => {
-                      const previewUrl = m.file ? URL.createObjectURL(m.file) : null;
+                  {/* Quick nav */}
+                  <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => goToIdx(activeIdx - 1)}
+                      disabled={activeIdx <= 0}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-transparent px-2 py-1 text-xs text-white/70 hover:bg-white/5 disabled:opacity-50"
+                      title="Previous memory"
+                    >
+                      <ChevronLeft size={16} />
+                      Prev
+                    </button>
 
-                      return (
-                        <div key={m.key} className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                          <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs text-white/70">Memory {idx + 1}</div>
-                            <button
-                              type="button"
-                              onClick={() => removeMemory(m.key)}
-                              disabled={loading || memories.length <= 1}
-                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-transparent px-2 py-1 text-xs text-white/70 hover:bg-white/5 disabled:opacity-50"
-                              title="Remove this memory"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                    <div className="text-xs text-white/60">
+                      Memory <span className="text-white">{activeIdx + 1}</span> / {memories.length}
+                    </div>
 
-                          <LocationInput
-                            value={{ city: m.city, region: m.region }}
-                            onChange={(city: string, region: string) => updateMemory(m.key, { city, region })}
-                          />
+                    <button
+                      type="button"
+                      onClick={() => goToIdx(activeIdx + 1)}
+                      disabled={activeIdx >= memories.length - 1}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-transparent px-2 py-1 text-xs text-white/70 hover:bg-white/5 disabled:opacity-50"
+                      title="Next memory"
+                    >
+                      Next
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
 
-                          <input
-                            className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500"
-                            type="datetime-local"
-                            value={m.dateLocal}
-                            onChange={(e) => updateMemory(m.key, { dateLocal: e.target.value })}
-                          />
+                  {/* Horizontal card rail */}
+                  <div
+                    ref={cardScrollRef}
+                    className="mt-1 flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  >
+                    {memories.map((m, idx) => (
+                      <MemoryCard
+                        key={m.key}
+                        id={`mem-card-${idx}`}
+                        idx={idx}
+                        active={idx === activeIdx}
+                        disabled={loading}
+                        canRemove={memories.length > 1}
+                        memory={m}
+                        onFocus={() => setActiveIdx(idx)}
+                        onRemove={() => removeMemory(m.key)}
+                        onUpdate={(patch) => updateMemory(m.key, patch)}
+                      />
+                    ))}
+                  </div>
 
-                          <textarea
-                            className="mt-2 w-full min-h-[90px] rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500"
-                            placeholder="Write a note (optional)"
-                            value={m.note}
-                            onChange={(e) => updateMemory(m.key, { note: e.target.value })}
-                          />
-
-                          <div className="mt-2 rounded-2xl border border-white/10 bg-black/30 p-4">
-                            <div className="text-xs text-white/70">Photo (required)</div>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => updateMemory(m.key, { file: e.target.files?.[0] ?? null })}
-                              className="mt-2 text-xs text-white/70"
-                            />
-
-                            {previewUrl ? (
-                              <div className="mt-3">
-                                <div className="relative aspect-square w-28 overflow-hidden rounded-xl border border-white/10">
-                                  <Image
-                                    src={previewUrl}
-                                    alt={`mem-${idx}`}
-                                    fill
-                                    className="object-cover"
-                                    onLoadingComplete={() => {
-                                      // Revoke after Image has loaded (safe cleanup)
-                                      try {
-                                        URL.revokeObjectURL(previewUrl);
-                                      } catch {}
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-2 text-xs text-red-200/80">Choose a photo to continue.</div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  {/* Dots */}
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    {memories.map((m, idx) => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => goToIdx(idx)}
+                        className={[
+                          "h-2.5 w-2.5 rounded-full border border-white/20 transition",
+                          idx === activeIdx ? "bg-white/80" : "bg-white/10 hover:bg-white/20",
+                        ].join(" ")}
+                        aria-label={`Go to memory ${idx + 1}`}
+                        title={`Memory ${idx + 1}`}
+                      />
+                    ))}
                   </div>
 
                   <div className="text-xs text-white/50">
@@ -712,7 +774,8 @@ export default function SignupOnboardingPage() {
                 </div>
               ) : null}
 
-              <div className="mt-2 flex items-center justify-between">
+              {/* Sticky actions */}
+              <div className="sticky bottom-0 mt-2 flex items-center justify-between bg-black/70 pt-3">
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-transparent px-4 py-3 text-xs font-semibold text-white/70 hover:bg-white/5 disabled:opacity-50"
@@ -760,5 +823,110 @@ export default function SignupOnboardingPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function MemoryCard({
+  id,
+  idx,
+  active,
+  disabled,
+  canRemove,
+  memory,
+  onUpdate,
+  onRemove,
+  onFocus,
+}: {
+  id: string;
+  idx: number;
+  active: boolean;
+  disabled: boolean;
+  canRemove: boolean;
+  memory: MemoryDraft;
+  onUpdate: (patch: Partial<MemoryDraft>) => void;
+  onRemove: () => void;
+  onFocus: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!memory.file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(memory.file);
+    setPreviewUrl(url);
+    return () => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    };
+  }, [memory.file]);
+
+  return (
+    <div
+      id={id}
+      onMouseEnter={onFocus}
+      onFocus={onFocus}
+      className={[
+        "min-w-[88%] md:min-w-[520px] snap-start",
+        "rounded-2xl border bg-black/30 p-4 transition",
+        active ? "border-white/30" : "border-white/10",
+      ].join(" ")}
+      style={{ scrollSnapAlign: "start" }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs text-white/70">Memory {idx + 1}</div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={disabled || !canRemove}
+          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-transparent px-2 py-1 text-xs text-white/70 hover:bg-white/5 disabled:opacity-50"
+          title="Remove this memory"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      <LocationInput
+        value={{ city: memory.city, region: memory.region }}
+        onChange={(city: string, region: string) => onUpdate({ city, region })}
+      />
+
+      <input
+        className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500"
+        type="datetime-local"
+        value={memory.dateLocal}
+        onChange={(e) => onUpdate({ dateLocal: e.target.value })}
+      />
+
+      <textarea
+        className="mt-2 w-full min-h-[90px] rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500"
+        placeholder="Write a note (optional)"
+        value={memory.note}
+        onChange={(e) => onUpdate({ note: e.target.value })}
+      />
+
+      <div className="mt-2 rounded-2xl border border-white/10 bg-black/30 p-4">
+        <div className="text-xs text-white/70">Photo (required)</div>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => onUpdate({ file: e.target.files?.[0] ?? null })}
+          className="mt-2 text-xs text-white/70"
+        />
+
+        {previewUrl ? (
+          <div className="mt-3">
+            <div className="relative aspect-square w-28 overflow-hidden rounded-xl border border-white/10">
+              <Image src={previewUrl} alt={`mem-${idx}`} fill className="object-cover" />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-red-200/80">Choose a photo to continue.</div>
+        )}
+      </div>
+    </div>
   );
 }
