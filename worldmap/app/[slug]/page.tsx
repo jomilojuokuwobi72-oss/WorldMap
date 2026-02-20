@@ -9,10 +9,12 @@ function normalizeSlug(raw: string) {
   return decodeURIComponent(raw).trim().toLowerCase();
 }
 
-function placeLabel(p?: { city?: string | null; region?: string | null; country?: string | null } | null) {
+function placeLabel(
+  p?: { city?: string | null; region?: string | null; country?: string | null } | null
+) {
   if (!p) return "Unknown";
   const parts = [p.city, p.region].filter(Boolean);
-  return parts.length ? parts.join(", ") : (p.country ?? "Unknown");
+  return parts.length ? parts.join(", ") : p.country ?? "Unknown";
 }
 
 function publicStorageUrl(bucket: string, path: string) {
@@ -25,10 +27,17 @@ function toMemoryCard(m: any, cover: any | null) {
   const location = placeLabel(m.place);
   const takenAt = m.happened_at
     ? new Date(m.happened_at).toLocaleString()
-    : (cover?.taken_at ? new Date(cover.taken_at).toLocaleString() : "Unknown time");
+    : cover?.taken_at
+      ? new Date(cover.taken_at).toLocaleString()
+      : "Unknown time";
 
+  // ✅ Use description for caption
+  const description = (m.description ?? "").toString();
+  const caption = description || undefined; // ✅ NO slicing
+
+
+  // Keep note for details (optional)
   const note = (m.note ?? "").toString();
-  const caption = note ? (note.length > 42 ? note.slice(0, 42) + "…" : note) : undefined;
 
   const src = cover?.storage_path
     ? publicStorageUrl("memory-media", cover.storage_path)
@@ -78,7 +87,7 @@ export default async function Page({ params }: { params: Params }) {
       pinned,
       created_at,
       place:places ( id, city, region, country )
-    `,
+    `
     )
     .eq("user_id", userId)
     .order("pinned", { ascending: false })
@@ -87,7 +96,7 @@ export default async function Page({ params }: { params: Params }) {
   const pins = (pinsRaw ?? []) as any[];
   const initialActivePlaceId = pins.find((p) => p.pinned)?.place_id ?? pins[0]?.place_id ?? null;
 
-  // 3) INITIAL MEMORIES + MEDIA (no cover_media_id anymore)
+  // 3) INITIAL MEMORIES + MEDIA
   let initialMemories: any[] = [];
   const mediaByMemoryId = new Map<string, any[]>();
 
@@ -97,11 +106,12 @@ export default async function Page({ params }: { params: Params }) {
       .select(
         `
         id,
+        description,
         note,
         happened_at,
         place_id,
         place:places ( city, region, country )
-      `,
+      `
       )
       .eq("user_id", userId)
       .eq("place_id", initialActivePlaceId)

@@ -9,8 +9,8 @@ export type MemoryCard = {
   src: string;
   location: string;
   takenAt: string;
-  caption?: string;  // short “quote”
-  details?: string;  // longer note/details
+  caption?: string; // title (description)
+  details?: string; // long description (note)
 };
 
 function PolaroidMini({
@@ -51,12 +51,18 @@ function PolaroidMini({
           </div>
 
           <div className="pt-3 pb-1">
-            <div className="polaroid-hand text-[18px] leading-[18px]">
-              {m.location}
-            </div>
+            <div className="polaroid-hand text-[18px] leading-[18px]">{m.location}</div>
             <div className="mt-1 text-xs text-zinc-300/80">{m.takenAt}</div>
+
             {m.caption ? (
-              <div className="mt-1 line-clamp-1 text-xs text-zinc-400">
+              <div
+                className="mt-1 text-xs text-zinc-400 overflow-hidden text-ellipsis"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2, // crop in tray
+                  WebkitBoxOrient: "vertical",
+                }}
+              >
                 {m.caption}
               </div>
             ) : null}
@@ -64,6 +70,55 @@ function PolaroidMini({
         </div>
       </div>
     </button>
+  );
+}
+
+/** ✅ Skeleton mini that matches the PolaroidMini size/layout */
+function PolaroidSkeleton({ index }: { index: number }) {
+  const tilt = useMemo(() => {
+    const base = index % 2 === 0 ? -2 : 2;
+    const extra = (index % 3) - 1;
+    return base + extra;
+  }, [index]);
+
+  return (
+    <div className="relative w-[170px] shrink-0 sm:w-[190px]" aria-hidden="true">
+      <div
+        className="rounded-2xl border border-white/10 bg-zinc-950/70 text-white shadow-xl backdrop-blur"
+        style={{ transform: `rotate(${tilt}deg)` }}
+      >
+        <div className="p-3">
+          <div className="relative h-[110px] w-full overflow-hidden rounded-xl bg-zinc-900">
+            {/* shimmer */}
+            <div className="absolute inset-0 animate-pulse bg-white/10" />
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_1.4s_infinite]" />
+          </div>
+
+          <div className="pt-3 pb-1 space-y-2">
+            <div className="h-[18px] w-3/4 rounded bg-white/10 animate-pulse" />
+            <div className="h-[12px] w-1/2 rounded bg-white/10 animate-pulse" />
+            <div className="h-[12px] w-full rounded bg-white/10 animate-pulse" />
+            <div className="h-[12px] w-5/6 rounded bg-white/10 animate-pulse" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Adds the shimmer keyframes once via inline global style */
+function ShimmerStyles() {
+  return (
+    <style jsx global>{`
+      @keyframes shimmer {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(120%);
+        }
+      }
+    `}</style>
   );
 }
 
@@ -85,13 +140,13 @@ function MemoryModal({
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4"
-      onClick={onClose} // ✅ changed from onMouseDown -> onClick
+      onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
         className="w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950 text-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()} // ✅ stop click from bubbling to backdrop
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <div className="min-w-0">
@@ -121,8 +176,11 @@ function MemoryModal({
           </div>
 
           <div className="p-5">
+            {/* Title = short description */}
             <div className="text-lg font-semibold">{memory.caption ?? "Memory"}</div>
-            <p className="mt-2 text-sm text-zinc-300">
+
+            {/* Full long note (not cropped) */}
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-300">
               {memory.details ?? "Add details later."}
             </p>
           </div>
@@ -135,27 +193,18 @@ function MemoryModal({
 export default function BottomTray({
   memories,
   activeLocation,
+  loading = false,
 }: {
   memories?: MemoryCard[];
   activeLocation?: string;
+  loading?: boolean;
 }) {
   const [selected, setSelected] = useState<MemoryCard | null>(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const dragStartY = useRef<number | null>(null);
   const dragDeltaY = useRef(0);
 
-  const demoMemories: MemoryCard[] = [
-    {
-      id: "1",
-      src: "/samples/arlington.jpeg",
-      location: "Arlington, TX",
-      takenAt: "2026-01-12 · 7:42 PM",
-      caption: "Guitars everywhere",
-      details: "Quick stop at a guitar shop. Wall-to-wall instruments.",
-    },
-  ];
-
-  const safeMemories = memories ?? demoMemories;
+  const safeMemories = memories ?? [];
   const safeActiveLocation = activeLocation ?? (safeMemories[0]?.location ?? "Memories");
 
   function onDragStart(clientY: number) {
@@ -179,6 +228,8 @@ export default function BottomTray({
 
   return (
     <>
+      <ShimmerStyles />
+
       {mobileExpanded ? (
         <div className="fixed inset-0 z-20 md:hidden" onClick={() => setMobileExpanded(false)} />
       ) : null}
@@ -202,28 +253,30 @@ export default function BottomTray({
             >
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-white">{safeActiveLocation}</div>
-                <div className="text-xs text-zinc-400">Memories</div>
+                <div className="text-xs text-zinc-400">{loading ? "Loading…" : "Memories"}</div>
               </div>
 
               <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 md:hidden">
-                <ChevronUp
-                  size={16}
-                  className={`transition-transform ${mobileExpanded ? "rotate-180" : ""}`}
-                />
+                <ChevronUp size={16} className={`transition-transform ${mobileExpanded ? "rotate-180" : ""}`} />
               </div>
             </div>
 
             <div className="flex gap-4 overflow-x-auto px-4 py-4">
-              {safeMemories.map((m, idx) => (
-                <PolaroidMini key={m.id} m={m} index={idx} onOpen={() => setSelected(m)} />
-              ))}
+              {loading ? (
+                Array.from({ length: 6 }).map((_, idx) => <PolaroidSkeleton key={`sk-${idx}`} index={idx} />)
+              ) : (
+                safeMemories.map((m, idx) => (
+                  <PolaroidMini key={m.id} m={m} index={idx} onOpen={() => setSelected(m)} />
+                ))
+              )}
+
               <div className="w-2 shrink-0" />
             </div>
           </div>
         </div>
       </div>
 
-      {selected ? <MemoryModal memory={selected} onClose={() => setSelected(null)} /> : null}
+      {!loading && selected ? <MemoryModal memory={selected} onClose={() => setSelected(null)} /> : null}
     </>
   );
 }

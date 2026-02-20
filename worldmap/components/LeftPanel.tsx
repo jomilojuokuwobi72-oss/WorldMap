@@ -67,6 +67,12 @@ export default function LeftPanel({
     (typeof window !== "undefined"
       ? `${window.location.origin}/${safeProfile.share_slug ?? "aparna"}`
       : `/${safeProfile.share_slug ?? "aparna"}`);
+  
+  const fullShareUrl =
+  typeof window !== "undefined"
+    ? `${window.location.origin}${safeShareUrl.startsWith("/") ? "" : "/"}${safeShareUrl}`
+    : safeShareUrl;
+
 
   const demoPins: Pin[] = [
     { id: "nyc", title: "New York", subtitle: "USA · 3 memories" },
@@ -94,7 +100,7 @@ export default function LeftPanel({
 
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(safeShareUrl);
+      await navigator.clipboard.writeText(fullShareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 900);
     } catch {}

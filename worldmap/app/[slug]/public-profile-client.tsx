@@ -13,20 +13,29 @@ function publicStorageUrl(bucket: string, path: string) {
   return `${base}/storage/v1/object/public/${bucket}/${path}`;
 }
 
-function placeLabel(p?: { city?: string | null; region?: string | null; country?: string | null } | null) {
+function placeLabel(
+  p?: { city?: string | null; region?: string | null; country?: string | null } | null
+) {
   if (!p) return "Unknown";
   const parts = [p.city, p.region].filter(Boolean);
-  return parts.length ? parts.join(", ") : (p.country ?? "Unknown");
+  return parts.length ? parts.join(", ") : p.country ?? "Unknown";
 }
 
 function toMemoryCard(m: any, cover: any | null): MemoryCard {
   const location = placeLabel(m.place);
   const takenAt = m.happened_at
     ? new Date(m.happened_at).toLocaleString()
-    : (cover?.taken_at ? new Date(cover.taken_at).toLocaleString() : "Unknown time");
+    : cover?.taken_at
+      ? new Date(cover.taken_at).toLocaleString()
+      : "Unknown time";
 
+  // ✅ Use description for caption (fallback: none)
+  
+  const description = (m.description ?? "").toString();
+  const caption = description || undefined;
+
+  // Keep note for details (optional)
   const note = (m.note ?? "").toString();
-  const caption = note ? (note.length > 42 ? note.slice(0, 42) + "…" : note) : undefined;
 
   const src = cover?.storage_path
     ? publicStorageUrl("memory-media", cover.storage_path)
@@ -75,17 +84,18 @@ export default function PublicProfileClient({
 
     setLoadingMemories(true);
 
-    // ✅ REMOVED cover_media_id from select
+    // ✅ Include description in select so caption uses it
     const { data: memRows, error: memErr } = await supabase
       .from("memories")
       .select(
         `
         id,
+        description,
         note,
         happened_at,
         place_id,
         place:places ( city, region, country )
-      `,
+      `
       )
       .eq("user_id", profileId)
       .eq("place_id", placeId)
@@ -158,22 +168,11 @@ export default function PublicProfileClient({
         />
 
         <BottomTray
-          memories={
-            loadingMemories
-              ? [
-                  {
-                    id: "loading",
-                    src: "/samples/arlington.jpeg",
-                    location: activeLocation,
-                    takenAt: "Loading…",
-                    caption: "Loading memories…",
-                    details: "Loading memories…",
-                  },
-                ]
-              : memories
-          }
+          memories={memories}
           activeLocation={activeLocation}
+          loading={loadingMemories}
         />
+
       </div>
     </main>
   );
