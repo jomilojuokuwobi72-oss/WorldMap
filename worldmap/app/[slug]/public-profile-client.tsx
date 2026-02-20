@@ -152,7 +152,19 @@ export default function PublicProfileClient({
     <main className="h-[100svh] w-full bg-black text-white">
       <div className="relative h-full w-full">
         <div className="absolute inset-0">
-          <MapboxMap />
+          <MapboxMap
+            pins={pins.map((p: any) => ({
+              id: p.id,
+              title: p.title,
+              lat: p.lat,
+              lng: p.lng,
+            }))}
+            activePinId={activePinId}
+            onSelectPin={(id) => {
+              setActivePinId(id);
+              fetchMemoriesForPin(id);
+            }}
+          />
         </div>
 
         <LeftPanel
@@ -167,7 +179,7 @@ export default function PublicProfileClient({
           }}
         />
 
-        <BottomTray
+          <BottomTray
           memories={memories}
           activeLocation={activeLocation}
           loading={loadingMemories}

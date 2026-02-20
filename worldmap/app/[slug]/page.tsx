@@ -31,12 +31,9 @@ function toMemoryCard(m: any, cover: any | null) {
       ? new Date(cover.taken_at).toLocaleString()
       : "Unknown time";
 
-  // ✅ Use description for caption
   const description = (m.description ?? "").toString();
-  const caption = description || undefined; // ✅ NO slicing
+  const caption = description || undefined;
 
-
-  // Keep note for details (optional)
   const note = (m.note ?? "").toString();
 
   const src = cover?.storage_path
@@ -77,7 +74,7 @@ export default async function Page({ params }: { params: Params }) {
   if (!profile || profile.is_public === false) notFound();
   const userId = profile.id as string;
 
-  // 2) PINS
+  // 2) PINS (✅ now includes lat/lng)
   const { data: pinsRaw } = await supabase
     .from("user_places")
     .select(
@@ -86,7 +83,7 @@ export default async function Page({ params }: { params: Params }) {
       label,
       pinned,
       created_at,
-      place:places ( id, city, region, country )
+      place:places ( id, city, region, country, lat, lng )
     `
     )
     .eq("user_id", userId)
@@ -139,21 +136,30 @@ export default async function Page({ params }: { params: Params }) {
 
   function pickCover(m: any) {
     const arr = mediaByMemoryId.get(m.id) ?? [];
-    return arr[0] ?? null; // ✅ first media = cover
+    return arr[0] ?? null;
   }
 
   const initialMemoryCards = initialMemories.map((m) => toMemoryCard(m, pickCover(m)));
 
-  const pinCards = pins.map((p) => {
-    const title = p.label ?? placeLabel(p.place);
-    const subtitle = p.place?.country ? `${p.place.country}` : "—";
-    return { id: p.place_id, title, subtitle };
-  });
+  // ✅ pinCards now includes lat/lng
+  const pinCards = pins
+    .map((p) => {
+      const title = p.label ?? placeLabel(p.place);
+      const subtitle = p.place?.country ? `${p.place.country}` : "—";
+
+      const lat = p.place?.lat;
+      const lng = p.place?.lng;
+
+      if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+      return { id: p.place_id, title, subtitle, lat, lng };
+    })
+    .filter(Boolean);
 
   return (
     <PublicProfileClient
       profile={profile}
-      pins={pinCards}
+      pins={pinCards as any}
       initialActivePinId={initialActivePlaceId ?? undefined}
       initialMemories={initialMemoryCards}
     />
