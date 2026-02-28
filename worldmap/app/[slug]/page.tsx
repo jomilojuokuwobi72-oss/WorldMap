@@ -107,7 +107,7 @@ export default async function Page({ params }: { params: Params }) {
         note,
         happened_at,
         place_id,
-        place:places ( city, region, country )
+        place:places ( city, region, country, country_code, lat, lng )
       `
       )
       .eq("user_id", userId)

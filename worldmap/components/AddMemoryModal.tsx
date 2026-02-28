@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Plus, Image as ImageIcon, MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import LocationInput, { type LocationValue } from "./LocationInput";
@@ -41,20 +41,42 @@ const EMPTY_LOC: LocationValue = {
   place_name: "",
 };
 
+type MemoryForEdit = {
+  id: string;
+  location: LocationValue;
+  description?: string | null;
+  note?: string | null;
+  happened_at?: string | null;
+};
+
+function toDateTimeLocal(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+    d.getMinutes(),
+  )}`;
+}
+
 export default function AddMemoryModal({
   ownerId,
   mode = "dark",
   open,
   onClose,
   onCreated,
+  onSaved,
   onSelectCreatedPin,
+  memoryToEdit,
 }: {
   ownerId: string;
   mode?: Mode;
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  onSaved?: (placeId: string) => void;
   onSelectCreatedPin?: (placeId: string) => void;
+  memoryToEdit?: MemoryForEdit | null;
 }) {
   const isLight = mode === "light";
 
@@ -78,12 +100,33 @@ export default function AddMemoryModal({
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const isEditing = Boolean(memoryToEdit?.id);
+
+  useEffect(() => {
+    if (!open) return;
+    if (memoryToEdit) {
+      setLoc(memoryToEdit.location);
+      setDescription(memoryToEdit.description ?? "");
+      setNote(memoryToEdit.note ?? "");
+      setHappenedAt(toDateTimeLocal(memoryToEdit.happened_at));
+      setFile(null);
+      setErr(null);
+      return;
+    }
+
+    setLoc(EMPTY_LOC);
+    setDescription("");
+    setNote("");
+    setHappenedAt("");
+    setFile(null);
+    setErr(null);
+  }, [open, memoryToEdit]);
 
   const canSubmit = useMemo(() => {
     const hasLoc = Boolean(loc.city.trim() || loc.region.trim() || loc.country.trim());
     const hasText = description.trim().length > 0 || note.trim().length > 0;
-    return Boolean(ownerId && hasLoc && (hasText || file));
-  }, [ownerId, loc, description, note, file]);
+    return Boolean(ownerId && hasLoc && (hasText || file || isEditing));
+  }, [ownerId, loc, description, note, file, isEditing]);
 
   async function uploadMedia(memoryId: string, f: File) {
     const ext = f.name.split(".").pop() || "jpg";
@@ -114,12 +157,27 @@ export default function AddMemoryModal({
     // 1) Try find
     const { data: existing, error: findErr } = await supabase
       .from("places")
-      .select("id")
+      .select("id, lat, lng")
       .eq("normalized_key", normalized_key)
       .maybeSingle();
 
     if (findErr) throw findErr;
-    if (existing?.id) return existing.id;
+    if (existing?.id) {
+      const missingCoords = existing.lat == null || existing.lng == null;
+      const hasCoords = location.lat != null && location.lng != null;
+      if (missingCoords && hasCoords) {
+        const { error: updateErr } = await supabase
+          .from("places")
+          .update({
+            lat: location.lat,
+            lng: location.lng,
+            country_code: location.country_code,
+          })
+          .eq("id", existing.id);
+        if (updateErr) throw updateErr;
+      }
+      return existing.id;
+    }
 
     // 2) Create
     const { data: created, error: createErr } = await supabase
@@ -171,7 +229,29 @@ export default function AddMemoryModal({
     if (error) throw error;
   }
 
-  async function createMemory() {
+  async function replaceMedia(memoryId: string, nextFile: File) {
+    const { data: oldMedia, error: oldMediaErr } = await supabase
+      .from("memory_media")
+      .select("id, storage_path")
+      .eq("memory_id", memoryId);
+    if (oldMediaErr) throw oldMediaErr;
+
+    const oldPaths = (oldMedia ?? [])
+      .map((row) => row.storage_path)
+      .filter((p): p is string => typeof p === "string" && p.length > 0);
+
+    if (oldPaths.length) {
+      const { error: removeErr } = await supabase.storage.from("memory-media").remove(oldPaths);
+      if (removeErr) throw removeErr;
+    }
+
+    const { error: deleteRowsErr } = await supabase.from("memory_media").delete().eq("memory_id", memoryId);
+    if (deleteRowsErr) throw deleteRowsErr;
+
+    await uploadMedia(memoryId, nextFile);
+  }
+
+  async function submitMemory() {
     if (!ownerId) return;
 
     // Guard: make sure we have a real selection
@@ -190,39 +270,49 @@ export default function AddMemoryModal({
       // pin it
       await ensureUserPin(ownerId, placeId, label);
 
-      // memory
-      const { data: mem, error: memErr } = await supabase
-        .from("memories")
-        .insert({
-          user_id: ownerId,
-          place_id: placeId,
-          description: description.trim() || null,
-          note: note.trim() || null,
-          happened_at: happenedAt ? new Date(happenedAt).toISOString() : null,
-          // visibility: "public" / "private" (optional)
-        })
-        .select("id")
-        .single();
+      if (isEditing && memoryToEdit?.id) {
+        const { error: updErr } = await supabase
+          .from("memories")
+          .update({
+            place_id: placeId,
+            description: description.trim() || null,
+            note: note.trim() || null,
+            happened_at: happenedAt ? new Date(happenedAt).toISOString() : null,
+          })
+          .eq("id", memoryToEdit.id)
+          .eq("user_id", ownerId);
 
-      if (memErr) throw memErr;
+        if (updErr) throw updErr;
 
-      if (file) {
-        await uploadMedia(mem.id, file);
+        if (file) await replaceMedia(memoryToEdit.id, file);
+      } else {
+        const { data: mem, error: memErr } = await supabase
+          .from("memories")
+          .insert({
+            user_id: ownerId,
+            place_id: placeId,
+            description: description.trim() || null,
+            note: note.trim() || null,
+            happened_at: happenedAt ? new Date(happenedAt).toISOString() : null,
+            // visibility: "public" / "private" (optional)
+          })
+          .select("id")
+          .single();
+
+        if (memErr) throw memErr;
+
+        if (file) {
+          await uploadMedia(mem.id, file);
+        }
       }
 
+      onSaved?.(placeId);
       onCreated?.();
       onSelectCreatedPin?.(placeId);
-
-      // reset + close
-      setLoc(EMPTY_LOC);
-      setDescription("");
-      setNote("");
-      setHappenedAt("");
-      setFile(null);
       onClose();
     } catch (e: unknown) {
       console.warn(e);
-      setErr(getErrorMessage(e, "Failed to create memory"));
+      setErr(getErrorMessage(e, isEditing ? "Failed to update memory" : "Failed to create memory"));
     } finally {
       setBusy(false);
     }
@@ -244,7 +334,7 @@ export default function AddMemoryModal({
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-2">
             <MapPin size={16} className={isLight ? "text-black/70" : "text-white/80"} />
-            <div className="text-sm font-semibold">Add a memory</div>
+            <div className="text-sm font-semibold">{isEditing ? "Edit memory" : "Add a memory"}</div>
           </div>
           <button onClick={onClose} className={cx("rounded-full border px-2.5 py-1.5", pillBtn)} aria-label="Close">
             <X size={16} />
@@ -338,7 +428,7 @@ export default function AddMemoryModal({
 
             <button
               disabled={!canSubmit || busy}
-              onClick={createMemory}
+              onClick={submitMemory}
               className={cx(
                 "inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold",
                 isLight ? "bg-black text-white" : "bg-white text-black",
@@ -346,7 +436,7 @@ export default function AddMemoryModal({
               )}
             >
               <Plus size={16} />
-              {busy ? "Saving…" : "Add memory"}
+              {busy ? "Saving…" : isEditing ? "Save changes" : "Add memory"}
             </button>
           </div>
         </div>

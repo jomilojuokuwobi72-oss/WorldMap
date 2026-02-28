@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronUp } from "lucide-react";
+import { ChevronUp, Pencil, Trash2 } from "lucide-react";
+import type { LocationValue } from "./LocationInput";
 
 export type MemoryCard = {
   id: string;
@@ -11,16 +12,25 @@ export type MemoryCard = {
   takenAt: string;
   caption?: string; // title (description)
   details?: string; // long description (note)
+  placeId?: string;
+  happenedAtIso?: string | null;
+  locationValue?: LocationValue;
 };
 
 function PolaroidMini({
   m,
   index,
   onOpen,
+  editMode = false,
+  onEdit,
+  onDelete,
 }: {
   m: MemoryCard;
   index: number;
   onOpen: () => void;
+  editMode?: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   const tilt = useMemo(() => {
     const base = index % 2 === 0 ? -2 : 2;
@@ -39,6 +49,35 @@ function PolaroidMini({
         className="rounded-2xl border border-white/10 bg-zinc-950/70 text-white shadow-xl backdrop-blur transition-transform duration-200 group-hover:-translate-y-1"
         style={{ transform: `rotate(${tilt}deg)` }}
       >
+        {editMode ? (
+          <div className="pointer-events-none absolute right-2 top-2 z-20 flex gap-1.5">
+            <button
+              type="button"
+              className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-200/45 bg-cyan-500/25 text-cyan-100 hover:bg-cyan-500/35"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.();
+              }}
+              aria-label={`Edit memory in ${m.location}`}
+              title="Edit memory"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-rose-200/55 bg-rose-500/35 text-rose-50 hover:bg-rose-500/45"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete?.();
+              }}
+              aria-label={`Delete memory in ${m.location}`}
+              title="Delete memory"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ) : null}
+
         <div className="p-3">
           <div className="relative h-[110px] w-full overflow-hidden rounded-xl bg-zinc-900">
             <Image
@@ -194,10 +233,18 @@ export default function BottomTray({
   memories,
   activeLocation,
   loading = false,
+  editMode = false,
+  canEdit = false,
+  onEditMemory,
+  onDeleteMemory,
 }: {
   memories?: MemoryCard[];
   activeLocation?: string;
   loading?: boolean;
+  editMode?: boolean;
+  canEdit?: boolean;
+  onEditMemory?: (memory: MemoryCard) => void;
+  onDeleteMemory?: (memory: MemoryCard) => void;
 }) {
   const [selected, setSelected] = useState<MemoryCard | null>(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);
@@ -253,7 +300,9 @@ export default function BottomTray({
             >
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-white">{safeActiveLocation}</div>
-                <div className="text-xs text-zinc-400">{loading ? "Loading…" : "Memories"}</div>
+                <div className="text-xs text-zinc-400">
+                  {loading ? "Loading…" : editMode && canEdit ? "Memories · Edit mode" : "Memories"}
+                </div>
               </div>
 
               <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 md:hidden">
@@ -266,7 +315,15 @@ export default function BottomTray({
                 Array.from({ length: 6 }).map((_, idx) => <PolaroidSkeleton key={`sk-${idx}`} index={idx} />)
               ) : (
                 safeMemories.map((m, idx) => (
-                  <PolaroidMini key={m.id} m={m} index={idx} onOpen={() => setSelected(m)} />
+                  <PolaroidMini
+                    key={m.id}
+                    m={m}
+                    index={idx}
+                    editMode={editMode && canEdit}
+                    onOpen={() => setSelected(m)}
+                    onEdit={() => onEditMemory?.(m)}
+                    onDelete={() => onDeleteMemory?.(m)}
+                  />
                 ))
               )}
 

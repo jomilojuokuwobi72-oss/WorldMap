@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Copy, MapPin, X, Plus } from "lucide-react";
+import { ChevronDown, Copy, MapPin, X, Plus, Pencil } from "lucide-react";
 import AddMemoryModal from "@/components/AddMemoryModal";
 
 export type Pin = {
@@ -41,6 +41,8 @@ export default function LeftPanel({
   shareUrl,
   pins,
   isOwner = false,
+  editMode = false,
+  onToggleEditMode,
   ownerId,
   onPinsChanged,
   onPinSelectedAfterCreate,
@@ -55,6 +57,8 @@ export default function LeftPanel({
   pins?: Pin[];
 
   isOwner?: boolean;
+  editMode?: boolean;
+  onToggleEditMode?: () => void;
   onPinsChanged?: () => void;
 
   // NEW: optional callback used by your parent to select + fetch memories
@@ -345,16 +349,28 @@ export default function LeftPanel({
                 <div className="flex items-center justify-between">
                   <div className={`text-sm font-semibold ${textMain}`}>Pins</div>
 
-                  {/* Owner-only: open the SAME memory modal */}
                   {isOwner ? (
-                    <button
-                      onClick={() => setAddOpen(true)}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border ${pillBtn}`}
-                      aria-label="Add memory"
-                      title="Add memory"
-                    >
-                      <Plus size={16} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={onToggleEditMode}
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold ${pillBtn} ${
+                          editMode ? "ring-1 ring-white/20" : ""
+                        }`}
+                        aria-label={editMode ? "Exit edit mode" : "Enter edit mode"}
+                        title={editMode ? "Exit edit mode" : "Edit memories"}
+                      >
+                        <Pencil size={14} />
+                        {editMode ? "Done" : "Edit"}
+                      </button>
+                      <button
+                        onClick={() => setAddOpen(true)}
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border ${pillBtn}`}
+                        aria-label="Add memory"
+                        title="Add memory"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
                   ) : null}
                 </div>
 
@@ -410,18 +426,32 @@ export default function LeftPanel({
             </div>
 
             <div className="px-3 pb-3">
-              {/* Owner-only add */}
+              {/* Owner-only controls */}
               {isOwner ? (
-                <button
-                  onClick={() => {
-                    setPinsOpen(false);
-                    setAddOpen(true);
-                  }}
-                  className={`mb-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold ${pillBtn}`}
-                >
-                  <Plus size={16} />
-                  Add a memory
-                </button>
+                <div className="mb-3 flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPinsOpen(false);
+                      setAddOpen(true);
+                    }}
+                    className={`inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold ${pillBtn}`}
+                  >
+                    <Plus size={16} />
+                    Add memory
+                  </button>
+                  <button
+                    onClick={() => {
+                      onToggleEditMode?.();
+                      setPinsOpen(false);
+                    }}
+                    className={`inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold ${pillBtn} ${
+                      editMode ? "ring-1 ring-white/20" : ""
+                    }`}
+                  >
+                    <Pencil size={16} />
+                    {editMode ? "Done" : "Edit"}
+                  </button>
+                </div>
               ) : null}
 
               <ul className="space-y-2">

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import MapboxMap from "@/components/MapboxMap";
 import LeftPanel, { type Pin, type PublicProfile } from "@/components/LeftPanel";
 import BottomTray, { type MemoryCard } from "@/components/BottomTray";
+import AddMemoryModal from "@/components/AddMemoryModal";
 import { supabase } from "@/lib/supabaseClient";
 
 function publicStorageUrl(bucket: string, path: string) {
@@ -41,6 +42,17 @@ function toMemoryCard(m: any, cover: any | null): MemoryCard {
     takenAt,
     caption,
     details: note || undefined,
+    placeId: m.place_id ?? undefined,
+    happenedAtIso: m.happened_at ?? null,
+    locationValue: {
+      city: m.place?.city ?? "",
+      region: m.place?.region ?? "",
+      country: m.place?.country ?? "",
+      country_code: m.place?.country_code ?? null,
+      lat: m.place?.lat ?? null,
+      lng: m.place?.lng ?? null,
+      place_name: [m.place?.city, m.place?.region, m.place?.country].filter(Boolean).join(", "),
+    },
   };
 }
 
@@ -64,6 +76,8 @@ export default function PublicProfileClient({
   const [loadingMemories, setLoadingMemories] = useState(false);
 
   const [isOwner, setIsOwner] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [memoryEditing, setMemoryEditing] = useState<MemoryCard | null>(null);
 
   const shareUrl = useMemo(() => `/${profileSlug}`, [profileSlug]);
 
@@ -89,7 +103,7 @@ export default function PublicProfileClient({
         note,
         happened_at,
         place_id,
-        place:places ( city, region, country )
+        place:places ( city, region, country, country_code, lat, lng )
       `
       )
       .eq("user_id", profileId)
@@ -135,7 +149,7 @@ export default function PublicProfileClient({
   }
 
   async function refreshPins() {
-    if (!profileId) return;
+    if (!profileId) return [] as Pin[];
 
     // Pull all places the user has pinned (user_places join places)
     const { data: rows, error } = await supabase
@@ -156,7 +170,7 @@ export default function PublicProfileClient({
 
     if (error) {
       console.warn("pins refresh error:", error);
-      return;
+      return [] as Pin[];
     }
 
     const places = (rows ?? []).map((r: any) => r.place).filter(Boolean);
@@ -172,6 +186,12 @@ export default function PublicProfileClient({
         .eq("user_id", profileId)
         .eq("place_id", pl.id);
 
+      if (!count || count <= 0) {
+        // Keep user_places clean: a pin with zero memories should disappear.
+        await supabase.from("user_places").delete().eq("user_id", profileId).eq("place_id", pl.id);
+        continue;
+      }
+
       const subtitle = `${pl.country ?? "—"} · ${(count ?? 0).toString()} memories`;
 
       nextPins.push({
@@ -186,6 +206,52 @@ export default function PublicProfileClient({
     // stable sort: title
     nextPins.sort((a, b) => a.title.localeCompare(b.title));
     setPinState(nextPins);
+    return nextPins;
+  }
+
+  async function deleteMemory(memoryId: string, placeId?: string) {
+    const { data: mediaRows, error: mediaErr } = await supabase
+      .from("memory_media")
+      .select("id, storage_path")
+      .eq("memory_id", memoryId);
+    if (mediaErr) throw mediaErr;
+
+    const paths = (mediaRows ?? [])
+      .map((row) => row.storage_path)
+      .filter((p): p is string => typeof p === "string" && p.length > 0);
+
+    if (paths.length) {
+      const { error: removeErr } = await supabase.storage.from("memory-media").remove(paths);
+      if (removeErr) throw removeErr;
+    }
+
+    const { error: mediaDeleteErr } = await supabase.from("memory_media").delete().eq("memory_id", memoryId);
+    if (mediaDeleteErr) throw mediaDeleteErr;
+
+    const { error: memDeleteErr } = await supabase
+      .from("memories")
+      .delete()
+      .eq("id", memoryId)
+      .eq("user_id", profileId);
+    if (memDeleteErr) throw memDeleteErr;
+
+    if (placeId) {
+      const { count, error: leftErr } = await supabase
+        .from("memories")
+        .select("id", { head: true, count: "exact" })
+        .eq("user_id", profileId)
+        .eq("place_id", placeId);
+      if (leftErr) throw leftErr;
+
+      if (!count || count <= 0) {
+        const { error: pinDeleteErr } = await supabase
+          .from("user_places")
+          .delete()
+          .eq("user_id", profileId)
+          .eq("place_id", placeId);
+        if (pinDeleteErr) throw pinDeleteErr;
+      }
+    }
   }
 
   useEffect(() => {
@@ -208,6 +274,40 @@ export default function PublicProfileClient({
   return (
     <main className="h-[100svh] w-full bg-black text-white">
       <div className="relative h-full w-full">
+        {isOwner && profileId ? (
+          <AddMemoryModal
+            ownerId={profileId}
+            mode="dark"
+            open={Boolean(memoryEditing)}
+            memoryToEdit={
+              memoryEditing
+                ? {
+                    id: memoryEditing.id,
+                    location: memoryEditing.locationValue ?? {
+                      city: "",
+                      region: "",
+                      country: "",
+                      country_code: null,
+                      lat: null,
+                      lng: null,
+                      place_name: "",
+                    },
+                    description: memoryEditing.caption ?? "",
+                    note: memoryEditing.details ?? "",
+                    happened_at: memoryEditing.happenedAtIso ?? null,
+                  }
+                : null
+            }
+            onClose={() => setMemoryEditing(null)}
+            onSaved={async (placeId) => {
+              setMemoryEditing(null);
+              await refreshPins();
+              setActivePinId(placeId);
+              await fetchMemoriesForPin(placeId);
+            }}
+          />
+        ) : null}
+
         <div className="absolute inset-0">
           <MapboxMap
             pins={pinState.map((p: any) => ({
@@ -235,9 +335,16 @@ export default function PublicProfileClient({
             fetchMemoriesForPin(id);
           }}
           isOwner={isOwner}
+          editMode={editMode}
+          onToggleEditMode={() => setEditMode((prev) => !prev)}
           ownerId={profileId}
           onPinsChanged={async () => {
-            await refreshPins();
+            const nextPins = await refreshPins();
+            if (nextPins.length === 0) {
+              setActivePinId(undefined);
+              setMemories([]);
+              return;
+            }
             if (activePinId) await fetchMemoriesForPin(activePinId);
           }}
           onPinSelectedAfterCreate={(placeId) => {
@@ -246,7 +353,41 @@ export default function PublicProfileClient({
           }}
         />
 
-        <BottomTray memories={memories} activeLocation={activeLocation} loading={loadingMemories} />
+        <BottomTray
+          memories={memories}
+          activeLocation={activeLocation}
+          loading={loadingMemories}
+          editMode={editMode}
+          canEdit={isOwner}
+          onEditMemory={(memory) => setMemoryEditing(memory)}
+          onDeleteMemory={async (memory) => {
+            const ok = window.confirm(`Delete memory "${memory.caption ?? "Untitled"}"? This cannot be undone.`);
+            if (!ok) return;
+            try {
+              await deleteMemory(memory.id, memory.placeId);
+              const nextPins = await refreshPins();
+              const stillHasActive = activePinId ? nextPins.some((p) => p.id === activePinId) : false;
+
+              if (stillHasActive && activePinId) {
+                await fetchMemoriesForPin(activePinId);
+                return;
+              }
+
+              const nextActiveId = nextPins[0]?.id;
+              if (!nextActiveId) {
+                setActivePinId(undefined);
+                setMemories([]);
+                return;
+              }
+
+              setActivePinId(nextActiveId);
+              await fetchMemoriesForPin(nextActiveId);
+            } catch (e) {
+              console.warn("delete memory failed", e);
+              window.alert("Could not delete memory. Please try again.");
+            }
+          }}
+        />
       </div>
     </main>
   );
