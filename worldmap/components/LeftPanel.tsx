@@ -194,7 +194,7 @@ export default function LeftPanel({
         <div
           className={[
             "md:rounded-[28px] md:border md:shadow-2xl md:backdrop-blur",
-            "rounded-b-[28px] rounded-t-none border-x-0 border-t-0 border-b shadow-2xl backdrop-blur",
+            "rounded-[28px] border shadow-2xl backdrop-blur",
             shellTheme,
           ].join(" ")}
         >
