@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowRight, MapPin, Lock, Link2, Sparkles, Images } from "lucide-react";
+import { ArrowRight, MapPin, Lock, Link2, Images } from "lucide-react";
 
 import MapboxMap from "@/components/MapboxMap";
 import WorldMapLogo from "@/components/worldMapLogo";
@@ -56,7 +56,6 @@ export default function HomePage() {
     }));
   }, [base15]);
 
-  // 🔑 shared headline style so left + right ALWAYS match
   const headlineClass =
     "text-balance text-4xl font-semibold leading-[0.98] tracking-tight sm:text-5xl md:text-6xl";
 
@@ -72,15 +71,27 @@ export default function HomePage() {
       <div className="mx-auto flex min-h-[100svh] max-w-7xl flex-col px-5 sm:px-6">
         {/* Nav */}
         <header className="flex items-center justify-between py-5 sm:py-6">
-          <WorldMapLogo className="text-white" />
+          <button onClick={() => router.push("/")} aria-label="Home">
+            <WorldMapLogo className="text-white" />
+          </button>
+
           <nav className="flex items-center gap-2 text-sm text-white/70">
             <button className="rounded-full px-3 py-2 hover:bg-white/5 hover:text-white">Home</button>
             <button className="rounded-full px-3 py-2 hover:bg-white/5 hover:text-white">About</button>
+
+            {/* ✅ NEW: Login link */}
+            <button
+              onClick={() => router.push("/login")}
+              className="rounded-full px-3 py-2 hover:bg-white/5 hover:text-white"
+            >
+              Login
+            </button>
+
             <button
               onClick={() => router.push("/signup")}
               className="ml-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black hover:opacity-90"
             >
-              Join early
+              Join
             </button>
           </nav>
         </header>
@@ -100,7 +111,6 @@ export default function HomePage() {
               Share a single link with friends — or keep it private.
             </p>
 
-            {/* bullets unchanged */}
             <ul className="mt-6 grid max-w-md gap-3 text-sm text-white/75">
               <li className="flex items-start gap-3">
                 <span className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10">
@@ -140,13 +150,21 @@ export default function HomePage() {
               </li>
             </ul>
 
-            <div className="mt-7">
+            <div className="mt-7 flex flex-wrap items-center gap-3">
               <button
                 onClick={() => router.push("/signup")}
                 className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black hover:opacity-90"
               >
-                Join early
+                Join
                 <ArrowRight size={16} />
+              </button>
+
+              {/* ✅ Optional: secondary login CTA */}
+              <button
+                onClick={() => router.push("/login")}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-6 py-3 text-sm font-semibold text-white hover:bg-white/15"
+              >
+                Login
               </button>
             </div>
           </div>
@@ -154,7 +172,7 @@ export default function HomePage() {
           {/* RIGHT */}
           <div className="pt-0 sm:pt-2 md:pt-14">
             <h2 className={headlineClass}>Pin memories on the map</h2>
-            
+
             <div className="mt-8 grid grid-cols-3 gap-5 sm:grid-cols-5">
               {tiles.map((p, idx) => (
                 <div

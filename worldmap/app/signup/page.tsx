@@ -50,6 +50,11 @@ type MemoryDraft = {
   key: string;
   city: string;
   region: string;
+  country: string;
+  country_code: string | null;
+  lat: number | null;
+  lng: number | null;
+  place_name: string;
   description: string; // short title (required)
   note: string; // long note (optional)
   dateLocal: string; // datetime-local
@@ -71,6 +76,14 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function getErrorMessage(err: unknown, fallback: string) {
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+  }
+  return fallback;
+}
+
 export default function SignupOnboardingPage() {
   const router = useRouter();
 
@@ -88,7 +101,6 @@ export default function SignupOnboardingPage() {
   // Step 2: profile
   const [fullName, setFullName] = useState("");
   const [shareSlug, setShareSlug] = useState("");
-  const [slugTouched, setSlugTouched] = useState(false); // kept (even if not used elsewhere)
   const [tagline, setTagline] = useState("");
   const [homeCity, setHomeCity] = useState("");
   const [homeRegion, setHomeRegion] = useState("");
@@ -103,6 +115,11 @@ export default function SignupOnboardingPage() {
       key: crypto.randomUUID(),
       city: "",
       region: "",
+      country: "",
+      country_code: null,
+      lat: null,
+      lng: null,
+      place_name: "",
       description: "",
       note: "",
       dateLocal: makeLocalDateTimeValue(new Date()),
@@ -193,6 +210,7 @@ export default function SignupOnboardingPage() {
 
     for (const m of memories) {
       if (!m.city.trim() || !m.region.trim()) return false;
+      if (m.lat === null || m.lng === null) return false;
       if (!m.description.trim()) return false;
       if (!m.file) return false;
     }
@@ -225,9 +243,9 @@ export default function SignupOnboardingPage() {
 
       setUid(userId);
       setStep(2);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[signup-step1] error:", e);
-      setError(e?.message ?? "Signup failed.");
+      setError(getErrorMessage(e, "Signup failed."));
     } finally {
       setLoading(false);
     }
@@ -244,16 +262,53 @@ export default function SignupOnboardingPage() {
     return pub.publicUrl;
   }
 
-  async function ensurePlace(city: string, region: string, country = "United States") {
-    const normalized_key = normalizePlaceKey(city, region, country);
+  async function ensurePlace(input: {
+    city: string;
+    region: string;
+    country?: string;
+    country_code?: string | null;
+    lat: number | null;
+    lng: number | null;
+  }) {
+    const country = input.country?.trim() || "United States";
+    const normalized_key = normalizePlaceKey(input.city, input.region, country);
 
-    const found = await supabase.from("places").select("id").eq("normalized_key", normalized_key).maybeSingle();
+    const found = await supabase
+      .from("places")
+      .select("id, lat, lng")
+      .eq("normalized_key", normalized_key)
+      .maybeSingle();
     if (found.error) throw found.error;
-    if (found.data?.id) return found.data.id as string;
+    if (found.data?.id) {
+      const missingCoords = found.data.lat == null || found.data.lng == null;
+      const hasCoords = input.lat != null && input.lng != null;
+      if (missingCoords && hasCoords) {
+        const { error: updateErr } = await supabase
+          .from("places")
+          .update({
+            lat: input.lat,
+            lng: input.lng,
+            country_code: input.country_code ?? null,
+          })
+          .eq("id", found.data.id);
+        if (updateErr) throw updateErr;
+      }
+      return found.data.id as string;
+    }
 
     const inserted = await supabase
       .from("places")
-      .insert([{ city, region, country, normalized_key }])
+      .insert([
+        {
+          city: input.city,
+          region: input.region,
+          country,
+          country_code: input.country_code ?? null,
+          lat: input.lat,
+          lng: input.lng,
+          normalized_key,
+        },
+      ])
       .select("id")
       .single();
 
@@ -294,7 +349,7 @@ export default function SignupOnboardingPage() {
       });
 
       if (profErr) {
-        const msg = (profErr as any)?.message ?? "Failed to create profile.";
+        const msg = getErrorMessage(profErr, "Failed to create profile.");
         if (msg.toLowerCase().includes("share_slug") || msg.toLowerCase().includes("duplicate")) {
           setError("This slug is already taken. Try a different one.");
         } else {
@@ -309,9 +364,9 @@ export default function SignupOnboardingPage() {
       requestAnimationFrame(() => {
         setOpenKey(memories[0]?.key ?? null);
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[signup-step2] error:", e);
-      setError(e?.message ?? "Failed to save profile.");
+      setError(getErrorMessage(e, "Failed to save profile."));
     } finally {
       setLoading(false);
     }
@@ -343,13 +398,20 @@ export default function SignupOnboardingPage() {
         const region = m.region.trim();
         const happened_at = new Date(m.dateLocal).toISOString();
 
-        const placeId = await ensurePlace(city, region, "United States");
+        const placeId = await ensurePlace({
+          city,
+          region,
+          country: m.country,
+          country_code: m.country_code,
+          lat: m.lat,
+          lng: m.lng,
+        });
 
         const pinLabel = `${city} Trip`;
         const upsertPin = await supabase
           .from("user_places")
           .upsert([{ user_id: uid, place_id: placeId, label: pinLabel, pinned: true }], {
-            onConflict: "user_id,place_id" as any,
+            onConflict: "user_id,place_id",
           });
         if (upsertPin.error) throw upsertPin.error;
 
@@ -394,9 +456,9 @@ export default function SignupOnboardingPage() {
       }
 
       router.push(`/${normalizedSlug}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[onboarding] error:", err);
-      setError(err?.message ?? "Something went wrong creating your memories.");
+      setError(getErrorMessage(err, "Something went wrong creating your memories."));
     } finally {
       setLoading(false);
     }
@@ -421,6 +483,11 @@ export default function SignupOnboardingPage() {
           key: nextKey,
           city: "",
           region: "",
+          country: "",
+          country_code: null,
+          lat: null,
+          lng: null,
+          place_name: "",
           description: "",
           note: "",
           dateLocal: makeLocalDateTimeValue(new Date()),
@@ -603,10 +670,7 @@ export default function SignupOnboardingPage() {
                       className={inputClass}
                       placeholder="Share slug (your link) e.g. aparna"
                       value={shareSlug}
-                      onChange={(e) => {
-                        setSlugTouched(true);
-                        setShareSlug(e.target.value);
-                      }}
+                      onChange={(e) => setShareSlug(e.target.value)}
                       required
                       name="share_slug__manual"
                       autoComplete="off"
@@ -644,10 +708,18 @@ export default function SignupOnboardingPage() {
                       <div className="text-xs text-white/70">Home location</div>
                       <div className="mt-2">
                         <LocationInput
-                          value={{ city: homeCity, region: homeRegion }}
-                          onChange={(city: string, region: string) => {
-                            setHomeCity(city);
-                            setHomeRegion(region);
+                          value={{
+                            city: homeCity,
+                            region: homeRegion,
+                            country: "",
+                            country_code: null,
+                            lat: null,
+                            lng: null,
+                            place_name: [homeCity, homeRegion].filter(Boolean).join(", "),
+                          }}
+                          onChange={(next) => {
+                            setHomeCity(next.city);
+                            setHomeRegion(next.region);
                           }}
                         />
                       </div>
@@ -862,21 +934,20 @@ function MemoryCardV2({
   onUpdate: (patch: Partial<MemoryDraft>) => void;
   onRemove: () => void;
 }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!memory.file) {
-      setPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(memory.file);
-    setPreviewUrl(url);
-    return () => {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {}
-    };
+  const previewUrl = useMemo(() => {
+    if (!memory.file) return null;
+    return URL.createObjectURL(memory.file);
   }, [memory.file]);
+
+  useEffect(
+    () => () => {
+      if (!previewUrl) return;
+      try {
+        URL.revokeObjectURL(previewUrl);
+      } catch {}
+    },
+    [previewUrl],
+  );
 
   const hasBasics = !!memory.city.trim() && !!memory.region.trim() && !!memory.description.trim();
   const hasPhoto = !!memory.file;
@@ -941,8 +1012,26 @@ function MemoryCardV2({
           </div>
 
           <LocationInput
-            value={{ city: memory.city, region: memory.region }}
-            onChange={(city: string, region: string) => onUpdate({ city, region })}
+            value={{
+              city: memory.city,
+              region: memory.region,
+              country: memory.country,
+              country_code: memory.country_code,
+              lat: memory.lat,
+              lng: memory.lng,
+              place_name: memory.place_name,
+            }}
+            onChange={(next) =>
+              onUpdate({
+                city: next.city,
+                region: next.region,
+                country: next.country,
+                country_code: next.country_code,
+                lat: next.lat,
+                lng: next.lng,
+                place_name: next.place_name,
+              })
+            }
           />
 
           <input
