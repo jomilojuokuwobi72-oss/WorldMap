@@ -216,11 +216,11 @@ function MemoryModal({
 
           <div className="p-5">
             {/* Title = short description */}
-            <div className="text-lg font-semibold">{memory.details ?? "Memory"}</div>
+            <div className="text-lg font-semibold">{memory.caption ?? "Memory"}</div>
 
             {/* Full long note (not cropped) */}
             <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-300">
-              {memory.caption ?? "Add details later."}
+              {memory.details ?? "Add details later."}
             </p>
           </div>
         </div>
