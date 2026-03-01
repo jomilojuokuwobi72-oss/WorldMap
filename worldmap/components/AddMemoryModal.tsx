@@ -47,6 +47,7 @@ type MemoryForEdit = {
   description?: string | null;
   note?: string | null;
   happened_at?: string | null;
+  imageSrc?: string | null;
 };
 
 function toDateTimeLocal(iso?: string | null) {
@@ -374,18 +375,18 @@ export default function AddMemoryModal({
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="min-w-0">
                 <div className={cx("mb-1 text-xs", isLight ? "text-black/60" : "text-white/60")}>When (optional)</div>
                 <input
                   type="datetime-local"
                   value={happenedAt}
                   onChange={(e) => setHappenedAt(e.target.value)}
-                  className={cx("w-full rounded-2xl border px-4 py-3 text-sm outline-none", inputTheme)}
+                  className={cx("w-full min-w-0 rounded-2xl border px-4 py-3 text-[16px] sm:text-sm outline-none", inputTheme)}
                 />
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <div className={cx("mb-1 text-xs", isLight ? "text-black/60" : "text-white/60")}>Photo (optional)</div>
                 <label
                   className={cx(
@@ -404,6 +405,11 @@ export default function AddMemoryModal({
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
+                {isEditing ? (
+                  <div className={cx("mt-1 text-[11px]", isLight ? "text-black/55" : "text-white/55")}>
+                    {file ? "New file selected. Saving will replace current photo." : "Leave empty to keep current photo."}
+                  </div>
+                ) : null}
               </div>
             </div>
 

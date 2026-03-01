@@ -47,6 +47,17 @@ function toMemoryCard(m: any, cover: any | null) {
     takenAt,
     caption,
     details: note || undefined,
+    placeId: m.place_id ?? undefined,
+    happenedAtIso: m.happened_at ?? null,
+    locationValue: {
+      city: m.place?.city ?? "",
+      region: m.place?.region ?? "",
+      country: m.place?.country ?? "",
+      country_code: m.place?.country_code ?? null,
+      lat: m.place?.lat ?? null,
+      lng: m.place?.lng ?? null,
+      place_name: [m.place?.city, m.place?.region, m.place?.country].filter(Boolean).join(", "),
+    },
   };
 }
 
