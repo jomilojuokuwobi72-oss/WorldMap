@@ -34,6 +34,9 @@ export default function MapboxMap({
 }: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const isTouchDevice =
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(pointer: coarse)")?.matches || "ontouchstart" in window);
 
   // marker instances by pin id
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
@@ -100,12 +103,16 @@ export default function MapboxMap({
       center,
       zoom,
       interactive: true,
+      pitchWithRotate: false,
     });
 
     map.on("load", () => {
       map.touchZoomRotate.enable();
+      map.touchZoomRotate.disableRotation();
       map.dragPan.enable();
-      map.scrollZoom.enable();
+      // Mobile scroll+map gestures can fight each other and feel janky.
+      if (isTouchDevice) map.scrollZoom.disable();
+      else map.scrollZoom.enable();
       map.resize();
     });
 
@@ -197,7 +204,7 @@ export default function MapboxMap({
     <div
       ref={containerRef}
       className="h-full w-full"
-      style={{ background: "#111", touchAction: "none" }}
+      style={{ background: "#111", touchAction: "pan-x pan-y" }}
     />
   );
 }
